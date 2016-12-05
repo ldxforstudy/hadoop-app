@@ -83,5 +83,16 @@ public final class DateHelper {
         System.out.println(get1stSecondOfDays(new DateTime()));
         System.out.println(getLastSecondOfDays(new DateTime()));
         System.out.println(toDateStr(DateHelper.offsetDateTime(new DateTime(), Calendar.DAY_OF_YEAR, -1)));
+
+        DateTime nowTime = new DateTime();
+        DateTime startDateTime = DateHelper.offsetDateTime(nowTime, Calendar.DAY_OF_YEAR, -1);
+        DateTime endDateTime = DateHelper.offsetDateTime(nowTime, Calendar.DAY_OF_YEAR, -1);
+        System.out.println("startDateTime: " + startDateTime);
+        System.out.println("endDateTime: " + endDateTime);
+
+        Long startTime = DateHelper.get1stSecondOfDays(startDateTime).getMillis();
+        Long endTime = DateHelper.getLastSecondOfDays(endDateTime).getMillis();
+        System.out.println("startTime: " + startTime);
+        System.out.println("endTime: " + endTime);
     }
 }
