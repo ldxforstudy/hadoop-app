@@ -2,15 +2,8 @@ package com.dxlau.hadoop.autohome;
 
 import com.dxlau.hadoop.utils.DateHelper;
 import com.dxlau.hadoop.utils.JsonHelper;
-import org.apache.commons.lang.StringUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.*;
-import org.apache.hadoop.hive.ql.io.RCFile;
-import org.apache.hadoop.hive.serde2.SerDeException;
-import org.apache.hadoop.hive.serde2.columnar.BytesRefArrayWritable;
-import org.apache.hadoop.hive.serde2.columnar.ColumnarSerDe;
-import org.apache.hadoop.hive.serde2.columnar.ColumnarStruct;
-import org.apache.hadoop.hive.serde2.lazy.LazyString;
 import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.NullWritable;
 import org.apache.hadoop.io.Text;
@@ -23,19 +16,20 @@ import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 import org.apache.hadoop.util.GenericOptionsParser;
 import org.joda.time.DateTime;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.util.*;
 
 /**
  * PCM端用户的偏好新车
- * yarn jar hadoop-app-1.0-UserNewcar.jar /user/hdfs/app/ml/DayTop/topJson_pcm  /user/hdfs/gdm/gdm_car_day_all_detail  /user/dxlau/user_newcar/out
+ * yarn jar hadoop-app-1.0-UserNewcar.jar /user/hdfs/app/ml/DayTop/topJson_pcm  /user/hdfs/app/ml/CityNewcar  /user/hdfs/app/ml/FavNewcar
  * Created by dxlau on 2016/11/29.
  */
 public class UserNewcar {
-    private static final Integer NEWCAR_COUNT = 5000;
+    private static final Integer NEWCAR_COUNT = 300;
     private static final String SPLIT_001_CHAR = "\001";
-    private static final String SPLIT_VERTICAL_CHAR = "#";
     private static final int TOP_60 = 60;
 
     static class UserNewcarMapper extends Mapper<LongWritable, Text, Text, Text> {
@@ -43,7 +37,7 @@ public class UserNewcar {
 
         private Text outKey = new Text();
         private Text outValue = new Text();
-        private Set<String> infoidAndPriceSet = new HashSet<>(NEWCAR_COUNT);
+        private Map<String, String> cityNewInfosMap = new HashMap<>(NEWCAR_COUNT);
 
         @Override
         protected void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
@@ -55,6 +49,8 @@ public class UserNewcar {
                 Map<String, Object> profileMap = JsonHelper.toJsonObj(userProfile);
                 Map<String, Object> bycarProfile = (Map<String, Object>) profileMap.get("bycar_profile");
 
+                //偏好城市
+                String cityIdStr = (String) bycarProfile.get("cityid");
                 //偏好价格,购买力
                 String favPrice = (String) bycarProfile.get("priceid");
                 Float favPriceFloat = 0.0F;
@@ -66,27 +62,36 @@ public class UserNewcar {
                 //output: userId\001车源ID@偏好价格
                 StringBuffer outKeyBuf = new StringBuffer();
                 StringBuffer outValueBuf = new StringBuffer();
-                for (String infoAndPrice : infoidAndPriceSet) {
-                    String[] infoAndPriceArr = infoAndPrice.split("@");
-                    String infoId = infoAndPriceArr[0];
-                    Float infoPrice = Float.valueOf(infoAndPriceArr[1]);
 
-                    //用户购买力与车源价格的近似值
-                    Float favInfoPrice = Math.abs(favPriceFloat - infoPrice);
+                for (String cityIdScore : cityIdStr.split("$")) {
+                    String favCityId = cityIdScore.split("@")[0];
+                    String cityNewInfos = cityNewInfosMap.get(favCityId);
+                    if (cityNewInfos != null) {
+                        for (String infoItem : cityNewInfos.split(",")) {
+                            String[] infoAndPrice = infoItem.split("@");
+                            String infoId = infoAndPrice[0];
+                            Float infoPrice = Float.valueOf(infoAndPrice[1]);
 
-                    outKeyBuf.append(userId);
+                            // 用户购买力与车源价格的近似值
+                            Float favInfoPrice = Math.abs(favPriceFloat - infoPrice);
 
-                    outValueBuf.append(infoId);
-                    outValueBuf.append("@");
-                    outValueBuf.append(favInfoPrice);
+                            outKeyBuf.append(userId);
+                            outKeyBuf.append("_");
+                            outKeyBuf.append(favCityId);
 
-                    outKey.set(outKeyBuf.toString());
-                    outValue.set(outValueBuf.toString());
+                            outValueBuf.append(infoId);
+                            outValueBuf.append("@");
+                            outValueBuf.append(favInfoPrice);
 
-                    //map输出,并清空buf
-                    context.write(outKey, outValue);
-                    outKeyBuf.setLength(0);
-                    outValueBuf.setLength(0);
+                            outKey.set(outKeyBuf.toString());
+                            outValue.set(outValueBuf.toString());
+
+                            //map输出,并清空buf
+                            context.write(outKey, outValue);
+                            outKeyBuf.setLength(0);
+                            outValueBuf.setLength(0);
+                        }
+                    }
                 }
             }
             Counter counter = context.getCounter(ValidInputEnum.class.getName(), ValidInputEnum.USER_COUNT.toString());
@@ -95,35 +100,8 @@ public class UserNewcar {
 
         @Override
         protected void setup(Context context) throws IOException, InterruptedException {
-            Configuration conf = context.getConfiguration();
             URI[] cacheFiles = context.getCacheFiles();
-            FileSystem hdfs = FileSystem.get(conf);
-            DateTime nowTime = new DateTime();
-            Long startTime = DateHelper.get1stSecondOfDays(DateHelper.offsetDateTime(nowTime, Calendar.DAY_OF_YEAR, -1)).getMillis();
-            Long endTime = DateHelper.getLastSecondOfDays(DateHelper.offsetDateTime(nowTime, Calendar.DAY_OF_YEAR, -1)).getMillis();
-
-            final LongWritable key = new LongWritable();
-            final BytesRefArrayWritable value = new BytesRefArrayWritable();
-
-            final Properties rcfileColProp = new Properties();
-            String columns = "";
-            String columnsType = "";
-            for (int i = 1; i <= 112; i++) {
-                columns += "col,";
-                columnsType += "string:";
-            }
-            rcfileColProp.setProperty("columns", columns.substring(0, columns.length() - 1));
-            rcfileColProp.setProperty("columns.types", columnsType.substring(0, columnsType.length() - 1));
-            final ColumnarSerDe serDe;
-            try {
-                serDe = new ColumnarSerDe();
-                serDe.initialize(conf, rcfileColProp);
-            } catch (SerDeException e) {
-                e.printStackTrace();
-                throw new IOException("Can't init ColumnarSerDe to handle RCFile!");
-            }
-
-
+            FileSystem hdfs = FileSystem.get(context.getConfiguration());
             for (URI cacheItem : cacheFiles) {
                 Path cachePath = new Path(cacheItem);
                 if (!hdfs.isDirectory(cachePath)) {
@@ -134,86 +112,29 @@ public class UserNewcar {
                 FileStatus[] cacheFileStatus = hdfs.listStatus(cachePath);
                 Path[] cacheChildPaths = FileUtil.stat2Paths(cacheFileStatus);
                 for (Path cacheChildItem : cacheChildPaths) {
-                    if (hdfs.isDirectory(cacheChildItem)) {
-                        continue;
-                    }
-
-                    final RCFile.Reader reader = new RCFile.Reader(hdfs, cacheChildItem, conf);
-                    while (reader.next(key)) {
-                        StringBuffer sb = new StringBuffer();
-                        reader.getCurrentRow(value);
-
-                        final ColumnarStruct cols;
-                        try {
-                            cols = (ColumnarStruct) serDe.deserialize(value);
-                        } catch (SerDeException e) {
-                            System.err.println("Exist RCFile's value can't be deserialized!");
+                    try {
+                        if (hdfs.isDirectory(cacheChildItem)) {
                             continue;
                         }
+                        FSDataInputStream fin = hdfs.open(cacheChildItem);
+                        BufferedReader br = new BufferedReader(new InputStreamReader(fin));
+                        String line = br.readLine();
+                        while (line != null) {
+                            String[] userAndInfos = line.split(SPLIT_001_CHAR);
+                            if (userAndInfos.length >= 2) {
+                                String infoJsonStr = userAndInfos[1];
+                                Map<String, Object> infoJson = JsonHelper.toJsonObj(infoJsonStr);
+                                String infos = (String) infoJson.get("infoidlist");
+                                cityNewInfosMap.put(userAndInfos[0], infos);
 
-                        final ArrayList<Object> colsArr = cols.getFieldsAsList();
-                        for (final Object colItem : colsArr) {
-                            // Lazy decompression happens here
-                            String colValue = "";
-                            if (colItem != null) {
-                                LazyString lazyString = (LazyString) colItem;
-                                Text text = lazyString.getWritableObject();
-                                colValue = text.toString();
+                                Counter newcarCounter = context.getCounter(ValidInputEnum.class.getName(), ValidInputEnum.NEWCAR_COUNT.toString());
+                                newcarCounter.increment(1);
                             }
-                            sb.append(colValue);
-                            sb.append(SPLIT_VERTICAL_CHAR);
+                            line = br.readLine();
                         }
-                        // 执行条件过滤
-                        String line = sb.substring(0, sb.length() - 1);
-                        String[] carInfoArr = line.split(SPLIT_VERTICAL_CHAR);
-                        if (carInfoArr.length >= 112) {
-
-                            Counter more112Counter = context.getCounter(UserNewcarMapper.ValidInputEnum.class.getName(), ValidInputEnum.MORE_112_COLS.toString());
-                            more112Counter.increment(1);
-
-                            String infoId = carInfoArr[0];
-                            String priceStr = carInfoArr[12];
-                            String isPub = carInfoArr[53];
-                            String pubDate = carInfoArr[54];
-                            String isSell = carInfoArr[60];
-                            String platform = carInfoArr[98];
-                            if (StringUtils.equalsIgnoreCase(platform, "100")) {
-                                // 去除站外车
-                                Counter outsiteCount = context.getCounter(UserNewcarMapper.ValidInputEnum.class.getName(), ValidInputEnum.OUTSITE.toString());
-                                outsiteCount.increment(1);
-                                continue;
-                            }
-                            if (!StringUtils.equalsIgnoreCase(isPub, "1")) {
-                                // 去除未发布车源
-                                Counter unPubCount = context.getCounter(UserNewcarMapper.ValidInputEnum.class.getName(), ValidInputEnum.UN_PUB.toString());
-                                unPubCount.increment(1);
-                                continue;
-                            }
-                            if (!StringUtils.equalsIgnoreCase(isSell, "10")) {
-                                // 去除非在售车源
-                                Counter noSellCount = context.getCounter(UserNewcarMapper.ValidInputEnum.class.getName(), ValidInputEnum.NONSELL.toString());
-                                noSellCount.increment(1);
-                                continue;
-                            }
-
-                            try {
-                                Long pubDateMills = DateHelper.parseDateTime(pubDate, DateHelper.FULL_FORMAT).getMillis();
-                                if (pubDateMills < startTime || pubDateMills > endTime) {
-                                    // 去除发布时间不在过去0-24h内车源
-                                    Counter notNewCount = context.getCounter(UserNewcarMapper.ValidInputEnum.class.getName(), ValidInputEnum.NOT_NEW.toString());
-                                    notNewCount.increment(1);
-                                    continue;
-                                }
-                            } catch (Exception e) {
-                                Counter exceptionCount = context.getCounter(UserNewcarMapper.ValidInputEnum.class.getName(), ValidInputEnum.EXCEPTION.toString());
-                                exceptionCount.increment(1);
-                                continue;
-                            }
-
-                            infoidAndPriceSet.add(infoId + "@" + priceStr);
-                            Counter newcarCounter = context.getCounter(UserNewcarMapper.ValidInputEnum.class.getName(), UserNewcarMapper.ValidInputEnum.NEWCAR_COUNT.toString());
-                            newcarCounter.increment(1);
-                        }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        System.err.println("读取缓存文件出错: " + cacheChildItem.getName());
                     }
                 }
             }
@@ -307,6 +228,8 @@ public class UserNewcar {
         //3. 设置mapper/reducer
         job.setMapperClass(UserNewcarMapper.class);
         job.setReducerClass(UserNewcarReducer.class);
+        // 0.95 * node-num(10)
+        job.setNumReduceTasks(9);
 
         //4. 设置输出key/value类型
         job.setMapOutputKeyClass(Text.class);
@@ -318,7 +241,7 @@ public class UserNewcar {
         String yesterdayDateStr = DateHelper.toDateStr(DateHelper.offsetDateTime(new DateTime(), Calendar.DAY_OF_YEAR, -1));
         String cacheParentPath = remailArgs[1];
         String cachePath = cacheParentPath + "/dt=" + yesterdayDateStr;
-//        System.out.println("待缓存路径: " + cachePath);
+        System.out.println("待缓存路径: " + cachePath);
 
         Path newcarPath = new Path(cachePath);
         job.addCacheFile(newcarPath.toUri());

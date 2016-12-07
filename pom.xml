@@ -89,6 +89,7 @@
                     <!--</execution>-->
                 <!--</executions>-->
             <!--</plugin>-->
+            <!-- shade-uber包 -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
@@ -100,17 +101,16 @@
                             <goal>shade</goal>
                         </goals>
                         <configuration>
+                            <finalName>hadoop-app-1.0-UserNewcar</finalName>
                             <artifactSet>
                                 <includes>
                                     <include>joda-time:joda-time</include>
-                                    <include>org.apache.hive:*</include>
                                 </includes>
                             </artifactSet>
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <manifestEntries>
                                         <Main-Class>com.dxlau.hadoop.autohome.UserNewcar</Main-Class>
-                                        <Build-Number>123</Build-Number>
                                     </manifestEntries>
                                 </transformer>
                             </transformers>
@@ -207,16 +207,16 @@
         </dependency>
 
         <!-- https://mvnrepository.com/artifact/org.apache.hive/hive-serde -->
-        <dependency>
-            <groupId>org.apache.hive</groupId>
-            <artifactId>hive-serde</artifactId>
-            <version>1.1.0-cdh5.5.2</version>
-        </dependency>
-        <!-- https://mvnrepository.com/artifact/org.apache.hive.hcatalog/hive-hcatalog-core -->
-        <dependency>
-            <groupId>org.apache.hive.hcatalog</groupId>
-            <artifactId>hive-hcatalog-core</artifactId>
-            <version>1.1.0-cdh5.5.2</version>
-        </dependency>
+        <!--<dependency>-->
+            <!--<groupId>org.apache.hive</groupId>-->
+            <!--<artifactId>hive-serde</artifactId>-->
+            <!--<version>1.1.0-cdh5.5.2</version>-->
+        <!--</dependency>-->
+        <!--&lt;!&ndash; https://mvnrepository.com/artifact/org.apache.hive.hcatalog/hive-hcatalog-core &ndash;&gt;-->
+        <!--<dependency>-->
+            <!--<groupId>org.apache.hive.hcatalog</groupId>-->
+            <!--<artifactId>hive-hcatalog-core</artifactId>-->
+            <!--<version>1.1.0-cdh5.5.2</version>-->
+        <!--</dependency>-->
     </dependencies>
 </project>

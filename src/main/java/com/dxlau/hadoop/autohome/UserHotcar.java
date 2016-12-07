@@ -23,12 +23,13 @@ import java.util.*;
 
 /**
  * PCM端用户的热门车源
- * yarn jar hadoop-app-1.0-UserHotcar.jar /user/hdfs/app/ml/DayTop/topJson_pcm  /user/dxlau/user_hotcar/hotcar  /user/dxlau/user_hotcar/out
+ * yarn jar hadoop-app-1.0-UserHotcar.jar /user/hdfs/app/ml/DayTop/topJson_pcm  /user/hdfs/app/hotcar/app_hotcar22_cityinfoids  /user/hdfs/app/ml/FavHotcar
  * yarn jar hadoop-app-1.0-UserHotcar.jar /user/dxlau/user_hotcar/profile  /user/dxlau/user_hotcar/hotcar  /user/dxlau/user_hotcar/out
  * Created by dxlau on 2016/11/21.
  */
 public class UserHotcar {
     private static final String SPLIT_001_CHAR = "\001";
+    private static final int HOTCAR_NUM = 100;
 
     static class UserHotcarMapper extends Mapper<LongWritable, Text, Text, Text> {
         enum ValidInputEnum {USER_COUNT, HOTCAR_COUNT}
@@ -100,7 +101,6 @@ public class UserHotcar {
 
         @Override
         protected void setup(Context context) throws IOException, InterruptedException {
-//            System.out.println("Mapper setup...");
             URI[] cacheFiles = context.getCacheFiles();
             FileSystem hdfs = FileSystem.get(context.getConfiguration());
             for (URI cacheItem : cacheFiles) {
@@ -113,7 +113,6 @@ public class UserHotcar {
                 FileStatus[] cacheFileStatus = hdfs.listStatus(cachePath);
                 Path[] cacheChildPaths = FileUtil.stat2Paths(cacheFileStatus);
                 for (Path cacheChildItem : cacheChildPaths) {
-//                    System.out.printf("%s has %s\n", cachePath, cacheChildItem.toUri().getPath());
                     try {
                         if (hdfs.isDirectory(cacheChildItem)) {
                             continue;
@@ -174,6 +173,8 @@ public class UserHotcar {
             Float base01 = maxNearPrice - minNearPrice;
 
             StringBuffer outValueBuf = new StringBuffer();
+            //取前100个车源
+            int count = 1;
             for (String infoPriceEle : infoPriceSortSet) {
                 String[] infoAndPrice = infoPriceEle.split("@");
                 String infoId = infoAndPrice[0];
@@ -185,6 +186,10 @@ public class UserHotcar {
                 outValueBuf.append("@");
                 outValueBuf.append(score);
                 outValueBuf.append(",");
+                if (count >= HOTCAR_NUM) {
+                    break;
+                }
+                count++;
             }
 
             String outValue = outValueBuf.substring(0, outValueBuf.length() - 1);
@@ -227,7 +232,7 @@ public class UserHotcar {
         job.setMapperClass(UserHotcarMapper.class);
         job.setReducerClass(UserHotcarReducer.class);
         // 0.95 * node-num(10)
-//        job.setNumReduceTasks(9);
+        job.setNumReduceTasks(9);
 
         //4. 设置输出key/value类型
         job.setMapOutputKeyClass(Text.class);
